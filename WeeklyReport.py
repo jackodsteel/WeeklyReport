@@ -4,6 +4,11 @@ import datetime
 import praw
 import time
 
+USERNAME = ""
+PASSWORD = ""
+CLIENT_ID = ""
+CLIENT_SECRET = ""
+
 USER_AGENT = "script:nz.co.jacksteel.weeklyreport:v0.0.1 (by /u/iPlain)"
 
 # Variables to Change
@@ -11,27 +16,8 @@ subs = [
     ['RequestABot', '']
 ]
 
-# Global Submission Variables
-submission_data = []  # Submission_Title, Submission_Author, Submission_Short_Link, Submission_Score, Submission_Short_Link, Submission_Created_Epoch, Submission_Created_GMT
-top_submissions = ['Score|Author|Post Title', ':---|:---|:---']
-gilded_submissions = ['Score|Author|Post Title|Gilded', ':---|:---|:---|:---']
-submission_authors = []  # Total_Score, Author, Count
-total_submission_count = 0
-top_submission_authors = ['Author|Total Score|Submission Count|Submission Average', ':---|:---|:---|:---']
-total_submission_authors = 0
-
-# Global Comment Variables
-comment_data = []  # Comment_Author, Comment_Score, Comment_Link, Submission_Title
-top_comments = ['Score|Author|Comment', ':---|:---|:---']
-gilded_comments = ['Score|Author|Comment|Gilded', ':---|:---|:---|:---']
-comment_authors = []  # Total_Score, Author, Count
-total_comment_count = 0
-top_comment_authors = ['Author|Total Score|Comment Count|Comment Average', ':---|:---|:---|:---']
-total_comment_authors = 0
-
 
 def main():
-
     # Login
     r = praw.Reddit(
         username=USERNAME,
@@ -56,12 +42,13 @@ def run_report(subname, post_to_sub, r):
 
     print('Running Report for ' + subname)
 
-    gather_data(sub)
-    process_submission_data()
-    process_comment_data()
-    submit_report(r)
-
-    reset_variables()
+    submission_data, gilded_submissions, comment_data, gilded_comments = gather_data(sub)
+    top_submissions, submission_authors, total_submission_count, top_submission_authors, total_submission_authors = process_submission_data(
+        submission_data)
+    top_comments, comment_authors, total_comment_count, top_comment_authors, total_comment_authors = process_comment_data(comment_data)
+    submit_report(r, subname, post_to_sub, submission_data, gilded_submissions, top_submissions, submission_authors,
+                  total_submission_count, top_submission_authors, total_submission_authors, comment_data,
+                  gilded_comments, top_comments, comment_authors, total_comment_count, top_comment_authors, total_comment_authors)
 
     return
 
@@ -69,43 +56,39 @@ def run_report(subname, post_to_sub, r):
 def gather_data(sub):
     print('Gathering Data')
 
-    global submission_data
-    global gilded_submissions
-    global comment_data
-    global gilded_comments
+    submission_data = []  # Submission_Title, Submission_Author, Submission_Short_Link, Submission_Score, Submission_Short_Link, Submission_Created_Epoch, Submission_Created_GMT
+    gilded_submissions = ['Score|Author|Post Title|Gilded', ':---|:---|:---|:---']
+    comment_data = []  # Comment_Author, Comment_Score, Comment_Link, Submission_Title
+    gilded_comments = ['Score|Author|Comment|Gilded', ':---|:---|:---|:---']
 
     # Gather submissions from the week
     epoch_a_week_ago = time.time() - 604800
 
     submissions = sub.new(limit=None)
-    # submissions = sub.search("", time_filter="year")
-
-    c = 0
 
     # Go through each submission
     for submission in submissions:
-        c += 1
-        print(c)
         if submission.created_utc < epoch_a_week_ago:
-            return
+            return submission_data, gilded_submissions, comment_data, gilded_comments
         # Disregard deleted or removed posts
         if submission.author:
             submission_data_row = []
 
-            submission_data_row.append(submission.title) #Submission_Title
-            submission_data_row.append("/u/" + submission.author.name) #Submission_Author
-            submission_data_row.append(submission.url) #Submission_Short_Link
-            submission_data_row.append(int(submission.score)) #Submission_Score
-            submission_data_row.append(submission.url) #Submission_Short_Link
-            submission_data_row.append(float(submission.created_utc)) #Submission_Created_Epoch
-            submission_data_row.append(str(time.strftime('%m/%d/%Y %H:%M:%S', time.gmtime(float(submission.created_utc))))) #Submission_Created_GMT
+            submission_data_row.append(submission.title)  # Submission_Title
+            submission_data_row.append("/u/" + submission.author.name)  # Submission_Author
+            submission_data_row.append(submission.url)  # Submission_Short_Link
+            submission_data_row.append(int(submission.score))  # Submission_Score
+            submission_data_row.append(submission.url)  # Submission_Short_Link
+            submission_data_row.append(float(submission.created_utc))  # Submission_Created_Epoch
+            submission_data_row.append(str(time.strftime('%m/%d/%Y %H:%M:%S', time.gmtime(
+                float(submission.created_utc)))))  # Submission_Created_GMT
 
             submission_data.append(submission_data_row)
 
             # Add gilded submissions to list
             if submission.gilded > 0:
                 gilded_submissions.append(str(
-                    submission.score) + '|/u/' + submission.author.name + '|[' + submission.title + '](' +')|' + str(
+                    submission.score) + '|/u/' + submission.author.name + '|[' + submission.title + '](' + ')|' + str(
                     submission.gilded) + 'X')
 
             # Get the comments
@@ -136,18 +119,17 @@ def gather_data(sub):
                                 comment.score) + '|/u/' + comment.author.name + '|[' + submission.title + '](' + ')|' + str(
                                 comment.gilded) + 'X')
 
-    return
+    return submission_data, gilded_submissions, comment_data, gilded_comments
 
 
-def process_submission_data():
+def process_submission_data(submission_data):
     print('Processing Submissions')
 
-    global submission_data
-    global top_submissions
-    global submission_authors
-    global total_submission_count
-    global top_submission_authors
-    global total_submission_authors
+    top_submissions = ['Score|Author|Post Title', ':---|:---|:---']
+    submission_authors = []  # Total_Score, Author, Count
+    total_submission_count = 0
+    top_submission_authors = ['Author|Total Score|Submission Count|Submission Average', ':---|:---|:---|:---']
+    total_submission_authors = 0
 
     submission_data = reversed(sorted(submission_data, key=itemgetter(3)))
 
@@ -178,169 +160,124 @@ def process_submission_data():
     submission_authors = reversed(sorted(submission_authors, key=itemgetter(0)))
 
     for submission_author in submission_authors:
+        total_submission_authors = total_submission_authors + 1
+        if len(top_submission_authors) < 28:
+            top_submission_authors.append(submission_author[1] + '|' + str(submission_author[0]) + '|' + str(
+                submission_author[2]) + '|' + str(int(float(submission_author[0]) / float(submission_author[2]))))
+        else:
+            break
 
-        try:
-
-            total_submission_authors = total_submission_authors + 1
-            if len(top_submission_authors) < 28:
-                top_submission_authors.append(submission_author[1] + '|' + str(submission_author[0]) + '|' + str(
-                    submission_author[2]) + '|' + str(int(float(submission_author[0]) / float(submission_author[2]))))
-            else:
-                break
-
-        except Exception as e:
-
-            print(e)
-
-    return
+    return top_submissions, submission_authors, total_submission_count, top_submission_authors, total_submission_authors
 
 
-def process_comment_data():
+def process_comment_data(comment_data):
     print('Processing Comments')
 
-    global comment_data  # Comment_Author, Comment_Score, Comment_Link, Submission_Title
-    global top_comments
-    global comment_authors  # Total_Score, Author, Count
-    global total_comment_count
-    global top_comment_authors
-    global total_comment_authors
+    top_comments = ['Score|Author|Comment', ':---|:---|:---']
+    comment_authors = []  # Total_Score, Author, Count
+    total_comment_count = 0
+    top_comment_authors = ['Author|Total Score|Comment Count|Comment Average', ':---|:---|:---|:---']
+    total_comment_authors = 0
 
     comment_data = reversed(sorted(comment_data, key=itemgetter(1)))
 
     for comment_data_row in comment_data:
+        total_comment_count = total_comment_count + 1
 
-        try:
+        # Create Top 25 Comments Table
+        if len(top_comments) < 28:
+            top_comments.append(
+                str(comment_data_row[1]) + '|' + str(comment_data_row[0]) + '|[' + comment_data_row[3] + '](' +
+                comment_data_row[2] + '?context=1000)')
 
-            total_comment_count = total_comment_count + 1
-
-            # Create Top 25 Comments Table
-            if len(top_comments) < 28:
-                top_comments.append(
-                    str(comment_data_row[1]) + '|' + str(comment_data_row[0]) + '|[' + comment_data_row[3] + '](' +
-                    comment_data_row[2] + '?context=1000)')
-
-            # Compile Top Comment Author Scores
-            if comment_authors:
-                comment_author_exists = False
-                for comment_author in comment_authors:
-                    if comment_data_row[0] == comment_author[1]:
-                        comment_author[0] = comment_author[0] + comment_data_row[1]
-                        comment_author[2] = comment_author[2] + 1
-                        comment_author_exists = True
-                        break
-                if not comment_author_exists:
-                    comment_authors.append([comment_data_row[1], comment_data_row[0], 1])
-            else:
+        # Compile Top Comment Author Scores
+        if comment_authors:
+            comment_author_exists = False
+            for comment_author in comment_authors:
+                if comment_data_row[0] == comment_author[1]:
+                    comment_author[0] = comment_author[0] + comment_data_row[1]
+                    comment_author[2] = comment_author[2] + 1
+                    comment_author_exists = True
+                    break
+            if not comment_author_exists:
                 comment_authors.append([comment_data_row[1], comment_data_row[0], 1])
-
-        except (Exception) as e:
-
-            print(e)
+        else:
+            comment_authors.append([comment_data_row[1], comment_data_row[0], 1])
 
     # Compile Top Comment Author Table
     comment_authors = reversed(sorted(comment_authors, key=itemgetter(0)))
 
     for comment_author in comment_authors:
+        total_comment_authors = total_comment_authors + 1
+        if len(top_comment_authors) < 28:
+            top_comment_authors.append(
+                str(comment_author[1]) + '|' + str(comment_author[0]) + '|' + str(comment_author[2]) + '|' + str(
+                    int(float(comment_author[0]) / float(comment_author[2]))))
 
-        try:
-
-            total_comment_authors = total_comment_authors + 1
-            if len(top_comment_authors) < 28:
-                top_comment_authors.append(
-                    str(comment_author[1]) + '|' + str(comment_author[0]) + '|' + str(comment_author[2]) + '|' + str(
-                        int(float(comment_author[0]) / float(comment_author[2]))))
-
-        except (Exception) as e:
-
-            print(e)
-
-    return
+    return top_comments, comment_authors, total_comment_count, top_comment_authors, total_comment_authors
 
 
-def submit_report(r):
+def submit_report(r, subname, post_to_sub, submission_data, gilded_submissions, top_submissions, submission_authors,
+                  total_submission_count, top_submission_authors, total_submission_authors, comment_data,
+                  gilded_comments, top_comments, comment_authors, total_comment_count, top_comment_authors, total_comment_authors):
     print('Compiling and Submitting Report')
-
-    global subname
-    global post_to_sub
-
-    global submission_data
-    global top_submissions
-    global gilded_submissions
-    global submission_authors
-    global total_submission_count
-    global top_submission_authors
-    global total_submission_authors
-
-    global comment_data
-    global top_comments
-    global gilded_comments
-    global comment_authors
-    global total_comment_count
-    global top_comment_authors
-    global total_comment_authors
 
     report_text = ['#Weekly Report for /r/' + subname]
 
-    try:
+    report_text.append(str(time.strftime('%A, %B %d, %Y', (
+            datetime.datetime.now() + datetime.timedelta(days=-7)).timetuple())) + '  -  ' + str(
+        time.strftime('%A, %B %d, %Y', time.gmtime())))
+    report_text.append('---')
 
-        report_text.append(str(time.strftime('%A, %B %d, %Y', (
-                datetime.datetime.now() + datetime.timedelta(days=-7)).timetuple())) + '  -  ' + str(
-            time.strftime('%A, %B %d, %Y', time.gmtime())))
-        report_text.append('---')
+    report_text.append('---')
+    report_text.append('#Submissions')
+    report_text.append('---')
 
-        report_text.append('---')
-        report_text.append('#Submissions')
-        report_text.append('---')
+    report_text.append('---')
+    report_text.append('Total Submissions: ' + str(total_submission_count))
+    report_text.append('Total Submission Authors: ' + str(total_submission_authors))
+    report_text.append('---')
 
-        report_text.append('---')
-        report_text.append('Total Submissions: ' + str(total_submission_count))
-        report_text.append('Total Submission Authors: ' + str(total_submission_authors))
-        report_text.append('---')
+    report_text.append('##Top 25 Submissions')
+    report_text.append('\r\n'.join(top_submissions))
+    report_text.append('---')
 
-        report_text.append('##Top 25 Submissions')
-        report_text.append('\r\n'.join(top_submissions))
-        report_text.append('---')
+    report_text.append('##Top 25 Submitters')
+    report_text.append('\r\n'.join(top_submission_authors))
+    report_text.append('---')
 
-        report_text.append('##Top 25 Submitters')
-        report_text.append('\r\n'.join(top_submission_authors))
-        report_text.append('---')
+    report_text.append('---')
+    report_text.append(str(len(gilded_submissions) - 2) + ' Gilded Submissions')
+    if len(gilded_submissions) > 2:
+        report_text.append('\r\n'.join(gilded_submissions))
+    report_text.append('---')
 
-        report_text.append('---')
-        report_text.append(str(len(gilded_submissions) - 2) + ' Gilded Submissions')
-        if len(gilded_submissions) > 2:
-            report_text.append('\r\n'.join(gilded_submissions))
-        report_text.append('---')
+    report_text.append('---')
+    report_text.append('#Comments')
+    report_text.append('---')
 
-        report_text.append('---')
-        report_text.append('#Comments')
-        report_text.append('---')
+    report_text.append('---')
+    report_text.append('Total Comments: ' + str(total_comment_count))
+    report_text.append('Total Comment Authors: ' + str(total_comment_authors))
+    report_text.append('---')
 
-        report_text.append('---')
-        report_text.append('Total Comments: ' + str(total_comment_count))
-        report_text.append('Total Comment Authors: ' + str(total_comment_authors))
-        report_text.append('---')
+    report_text.append('##Top 25 Comments')
+    report_text.append('\r\n'.join(top_comments))
+    report_text.append('---')
 
-        report_text.append('##Top 25 Comments')
-        report_text.append('\r\n'.join(top_comments))
-        report_text.append('---')
+    report_text.append('##Top 25 Commenters')
+    report_text.append('\r\n'.join(top_comment_authors))
+    report_text.append('---')
 
-        report_text.append('##Top 25 Commenters')
-        report_text.append('\r\n'.join(top_comment_authors))
-        report_text.append('---')
+    report_text.append('---')
+    report_text.append(str(len(gilded_comments) - 2) + ' Gilded Comments')
+    if len(gilded_comments) > 2:
+        report_text.append('\r\n'.join(gilded_comments))
+    report_text.append('---')
 
-        report_text.append('---')
-        report_text.append(str(len(gilded_comments) - 2) + ' Gilded Comments')
-        if len(gilded_comments) > 2:
-            report_text.append('\r\n'.join(gilded_comments))
-        report_text.append('---')
-
-        report_text.append('---')
-        report_text.append('^(created by /u/_korbendallas_)')
-        report_text.append('---')
-
-    except Exception as e:
-
-        print(e)
+    report_text.append('---')
+    report_text.append('^(created by /u/_korbendallas_)')
+    report_text.append('---')
 
     # Submit Report
     post_title = 'Weekly Report for /r/' + subname + ' - ' + str(time.strftime('%A, %B %d, %Y', time.gmtime()))
@@ -348,6 +285,7 @@ def submit_report(r):
     try:
 
         print('\r\n\r\n'.join(report_text))
+        # TODO: Add this back
         # r.submit('WeeklyReport', post_title, text='\r\n\r\n'.join(report_text))
 
     except Exception as e:
@@ -368,46 +306,5 @@ def submit_report(r):
     return
 
 
-def reset_variables():
-    global subname
-    global post_to_sub
-
-    global submission_data
-    global top_submissions
-    global gilded_submissions
-    global submission_authors
-    global total_submission_count
-    global top_submission_authors
-    global total_submission_authors
-
-    global comment_data
-    global top_comments
-    global gilded_comments
-    global comment_authors
-    global total_comment_count
-    global top_comment_authors
-    global total_comment_authors
-
-    subname = ''
-    post_to_sub = ''
-
-    submission_data = []
-    top_submissions = ['Score|Author|Post Title', ':---|:---|:---']
-    gilded_submissions = ['Score|Author|Post Title|Gilded', ':---|:---|:---|:---']
-    submission_authors = []
-    total_submission_count = 0
-    top_submission_authors = ['Author|Total Score|Submission Count|Submission Average', ':---|:---|:---|:---']
-    total_submission_authors = 0
-
-    comment_data = []
-    top_comments = ['Score|Author|Comment', ':---|:---|:---']
-    gilded_comments = ['Score|Author|Comment|Gilded', ':---|:---|:---|:---']
-    comment_authors = []
-    total_comment_count = 0
-    top_comment_authors = ['Author|Total Score|Comment Count|Comment Average', ':---|:---|:---|:---']
-    total_comment_authors = 0
-
-    return
-
-
-main()
+if __name__ == "__main__":
+    main()
