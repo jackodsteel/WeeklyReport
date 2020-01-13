@@ -67,6 +67,53 @@ def create_reddit_table(column_names, data_extractor, data):
     return column_names_str + "\n" + column_formats_str + "\n" + "\n".join(data_columns)
 
 
+class ReportData:
+    total_count = None
+    total_authors_count = None
+    top_entries_table = None
+    top_authors_table = None
+    gilded_entries_count = None
+    gilded_entries_table = None
+
+
+def process_data(data, data_column_title, type_name):
+    """
+    data should be a list of PRAW objects, either comments or submissions. They must also have a `data` and `link`
+    attribute which you must add.
+    """
+    report_data = ReportData()
+    report_data.total_count = len(data)
+
+    authors = collections.defaultdict(AuthorData)
+    for entry in data:
+        authors[entry.author.name].record_post(entry.score)
+    report_data.total_authors_count = len(authors)
+
+    top_entries = list(sorted(data, key=lambda s: s.score, reverse=True))[:25]
+    report_data.top_entries_table = create_reddit_table(
+        ["Score", "Author", data_column_title],
+        lambda e: [e.score, "/u/" + e.author.name, f"[{e.data}]({e.link})"],
+        top_entries
+    )
+
+    top_authors = list(sorted(authors.items(), key=lambda kv: kv[1], reverse=True))[:25]
+    report_data.top_authors_table = create_reddit_table(
+        ["Author", "Total Score", type_name + " Count", type_name + " Average"],
+        lambda n_d: ["/u/" + n_d[0], n_d[1].total_score, n_d[1].count, n_d[1].total_score // n_d[1].count],
+        top_authors
+    )
+
+    gilded_entries = list(filter(lambda s: s.gilded > 0, data))
+    report_data.gilded_entries_count = len(gilded_entries)
+    report_data.gilded_entries_table = create_reddit_table(
+        ["Score", "Author", data_column_title, "Gilded"],
+        lambda e: [e.score, "/u/" + e.author.name, f"[{e.data}]({e.link})", f"{e.gilded}X"],
+        gilded_entries
+    )
+
+    return report_data
+
+
 def create_report_body(subreddit_name):
     reddit = praw.Reddit(
         username=USERNAME,
@@ -82,62 +129,21 @@ def create_report_body(subreddit_name):
     time_one_week_ago_epoch = int(time_one_week_ago.timestamp())
 
     submissions = get_submissions(subreddit_name, reddit, pushshift, time_one_week_ago_epoch)
-    total_submission_count = len(submissions)
-
-    submission_authors = collections.defaultdict(AuthorData)
     for submission in submissions:
-        submission_authors[submission.author.name].record_post(submission.score)
-    total_submission_authors = len(submission_authors)
-
-    top_submissions = list(sorted(submissions, key=lambda s: s.score, reverse=True))[:25]
-    top_submissions_table = create_reddit_table(
-        ["Score", "Author", "Post Title"],
-        lambda s: [s.score, "/u/" + s.author.name, f"[{s.title}]({s.shortlink})"],
-        top_submissions
-    )
-
-    top_submitters = list(sorted(submission_authors.items(), key=lambda kv: kv[1], reverse=True))[:25]
-    top_submitters_table = create_reddit_table(
-        ["Author", "Total Score", "Submission Count", "Submission Average"],
-        lambda name_d: ["/u/" + name_d[0], name_d[1].total_score, name_d[1].count, name_d[1].total_score // name_d[1].count],
-        top_submitters
-    )
-
-    gilded_submissions = list(filter(lambda s: s.gilded > 0, submissions))
-    gilded_submissions_table = create_reddit_table(
-        ["Score", "Author", "Post Title", "Gilded"],
-        lambda s: [s.score, "/u/" + s.author.name, f"[{s.title}]({s.shortlink})", f"{s.gilded}X"],
-        gilded_submissions
-    )
+        submission.data = submission.title
+        submission.link = submission.shortlink
+    submission_report = process_data(submissions, "Post Title", "Submission")
 
     comments = get_comments(subreddit_name, reddit, pushshift, time_one_week_ago_epoch)
-    total_comment_count = len(comments)
-
-    comment_authors = collections.defaultdict(AuthorData)
     for comment in comments:
-        comment_authors[comment.author.name].record_post(comment.score)
-    total_comment_authors = len(comment_authors)
+        ind = next((i for i, ch in enumerate(comment.body) if ch in {'\n', '`'}), len(comment.body))
+        ind = min(ind, 150)
+        comment.data = comment.body[:ind]
+        if ind < len(comment.body) - 2:
+            comment.data += " ...\\[trimmed\\]"
+        comment.link = comment.permalink
+    comment_report = process_data(comments, "Comment Link", "Comment")
 
-    top_comments = list(sorted(comments, key=lambda s: s.score, reverse=True))[:25]
-    top_comments_table = create_reddit_table(
-        ["Score", "Author", "Comment Link"],
-        lambda s: [s.score, "/u/" + s.author.name, f"[{s.submission.title}]({s.permalink})"],
-        top_comments
-    )
-
-    top_commenters = list(sorted(comment_authors.items(), key=lambda kv: kv[1], reverse=True))[:25]
-    top_commenters_table = create_reddit_table(
-        ["Author", "Total Score", "Comment Count", "Comment Average"],
-        lambda name_d: ["/u/" + name_d[0], name_d[1].total_score, name_d[1].count, name_d[1].total_score // name_d[1].count],
-        top_commenters
-    )
-
-    gilded_comments = list(filter(lambda s: s.gilded > 0, comments))
-    gilded_comments_table = create_reddit_table(
-        ["Score", "Author", "Comment Link", "Gilded"],
-        lambda s: [s.score, "/u/" + s.author.name, f"[{s.submission.title}]({s.permalink})", f"{s.gilded}X"],
-        gilded_comments
-    )
 
     return f"""
 #Weekly Report for /r/{subreddit_name}
@@ -151,25 +157,25 @@ def create_report_body(subreddit_name):
 ---
 ---
 
-Total Submissions: {total_submission_count}
+Total Submissions: {submission_report.total_count}
 
-Total Submission Authors: {total_submission_authors}
+Total Submission Authors: {submission_report.total_authors_count}
 
 ---
 
 ##Top 25 Submissions
-{top_submissions_table}
+{submission_report.top_entries_table}
 
 ---
 
 ##Top 25 Submitters
-{top_submitters_table}
+{submission_report.top_authors_table}
 
 ---
 ---
 
-{len(gilded_submissions)} Gilded Submissions
-{gilded_submissions_table if len(gilded_submissions) > 0 else ""}
+{submission_report.gilded_entries_count} Gilded Submissions
+{submission_report.gilded_entries_table if submission_report.gilded_entries_count > 0 else ""}
 
 
 #Comments
@@ -177,25 +183,25 @@ Total Submission Authors: {total_submission_authors}
 ---
 ---
 
-Total Comments: {total_comment_count}
+Total Comments: {comment_report.total_count}
 
-Total Comment Authors: {total_comment_authors}
+Total Comment Authors: {comment_report.total_authors_count}
 
 ---
 
 ##Top 25 Comments
-{top_comments_table}
+{comment_report.top_entries_table}
 
 ---
 
 ##Top 25 Commenters
-{top_commenters_table}
+{comment_report.top_authors_table}
 
 ---
 ---
 
-{len(gilded_comments)} Gilded Comments
-{gilded_comments_table if len(gilded_comments) > 0 else ""}
+{comment_report.gilded_entries_count} Gilded Comments
+{comment_report.gilded_entries_table if comment_report.gilded_entries_count > 0 else ""}
 
 ---
 ---
